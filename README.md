@@ -24,8 +24,10 @@ Built with Godot 4.3 (Compatibility renderer, WebGL 2) and Kenney's CC0 art. Thi
   their errands, pay fairly. Under 30 on average they walk out for a day.
 - **Days:** a day is one minute at normal speed and ends with a report: profit, morale, a chart, and a word from
   whoever had the hardest day. Fall 500 coins into debt and the Works closes.
+- **A guided start:** a new game opens on a small line that is already running, and a tutorial walks you through
+  building a second one, tile by tile, then on to the crew.
 - **Also:** daily events a happy coworker can head off, five plant upgrades, a story per coworker told as you finish
-  their errands, a tutorial, and saves in your browser every 20 seconds.
+  their errands, and saves in your browser every 20 seconds.
 
 ## Controls
 

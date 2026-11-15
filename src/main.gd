@@ -27,17 +27,19 @@ const ITEM_LOOK := {
 }
 const CREW_LOOK := {"dock": "character-worker", "tech": "character-male-c", "qa": "character-female-e", "sales": "character-female-b"}
 const HELP := "Every key has a button in the bottom bar, so a touch screen works too. Click a build button (or press its number), then the floor; click it again to put the tool away. Drag the floor to move the view. R turns the piece, right-click cancels or removes. Click a coworker to talk, a building to inspect it, an inbound dock to change what it orders. WASD or arrows move, Q and E turn the view, the wheel zooms, Space pauses, M mutes everything, N just the music, F3 shows the frame rate."
-## The tutorial: what Pip is told, and the build button that pulses while she is told it. _tutorial_done() says when
-## each step is finished.
+## The tutorial. A new game opens on a small working line (Sim.starter), and Pip is walked through building a second
+## one beside it, one piece at a time. Each step: what she is told, the build button that pulses, and the floor tile that
+## glows (or null). _tutorial_done() says when a step is finished.
 const TUTORIAL := [
-	["Welcome to the Hopper Works, Pip! Steel arrives at a dock. Click [b]Inbound dock[/b] below, then click a floor tile.", "inbound"],
-	["The orange arrow shows where a building sends things. Choose [b]Press[/b] and place it where the arrow points. R turns a piece before you place it.", "press"],
-	["Panels need to leave. Place an [b]Outbound dock[/b] a tile or two past the press.", "outbound"],
-	["Join them with [b]Conveyor[/b] so crates travel dock, press, dock. Drag to lay a run. Right-click removes a mistake.", "belt"],
-	["First sale! The contract up top wants 20 panels by the end of day 2. The buttons > >> >>> speed time up; || or Space pauses.", ""],
-	["Your crew walks between the buildings they look after. Their mood changes how fast their part of the plant runs. Click one of them.", ""],
-	["Type anything and press Enter: kindness lifts morale, rudeness sinks it. Or click [b]Any work?[/b] for an errand that pays.", ""],
-	["Do the errand: the orange line up top says how. Everyone loses a little morale each day, so keep talking, helping and paying fairly. That is the job. Good luck!", ""],
+	["[font_size=28][b]Hoppertunity[/b][/font_size]\nYou are Pip Hopper, the new floor manager of the Hopper Works. Ship five contracts and the plant is saved. Look after the four people who run it, or it will not be.\n\nThis is your line. Steel comes in at the [b]green dock[/b], the [b]press[/b] stamps it into panels, and the [b]orange dock[/b] ships them. Watch a couple of crates make the trip.", "", null],
+	["Every panel sold is money. But the contract up top wants 20 by the end of day 2, and one press is slow. Let's build a second line.\n\nClick [b]Inbound dock[/b] below, then the glowing tile.", "inbound", Vector2i(4, 7)],
+	["The orange arrow on a building shows which way it sends things.\n\nNow a [b]Press[/b] on the next glowing tile, right where the dock's arrow points.", "press", Vector2i(5, 7)],
+	["A [b]Conveyor[/b] carries things one tile along its arrow. Put one after the press.", "belt", Vector2i(6, 7)],
+	["And an [b]Outbound dock[/b] at the end to sell what arrives.", "outbound", Vector2i(7, 7)],
+	["Two lines running! Time is yours to bend: the [b]> >> >>>[/b] buttons at the top speed it up, [b]||[/b] or Space pauses. Try one.", "", null],
+	["Four people keep this plant going, and their mood sets how fast their part of it runs. Click one of them (their names float over their heads).", "", null],
+	["Type anything and press Enter: kindness lifts morale, rudeness sinks it. Or click [b]Any work?[/b] for an errand that pays.", "", null],
+	["Do the errand: the orange line up top says how, and what it wants is marked in orange on the floor. Everyone loses a little morale each day, so keep talking, helping and paying fairly.\n\nThat is the job. Good luck, Pip!", "", null],
 ]
 const TRUCK_LOAD := 12  # crates a truck brings or takes before it drives off and the next one backs in
 const PERSONAL := 0.55  # how close two people may stand, in tiles
@@ -77,6 +79,9 @@ var belts_dirty := true
 var trucks := {}  # Vector2i of a dock -> {"node", "home", "front", "count", "last_t", "away"}: the van parked at it
 var item_mm := {}  # item id -> MultiMesh
 var floor_mm := MultiMesh.new()
+var scenery := Node3D.new()  # the building around the floor: apron, walls on the far sides, props (see _scenery)
+var scenery_for := []  # the floor size and view it was built for
+const APRON := 2  # tiles of walkway between the build floor and the walls
 var ghost := Node3D.new()
 var ghost_key := ""
 var crew_nodes := {}  # crew id (and "pip") -> Node3D
@@ -94,6 +99,7 @@ var toast: Label
 var talk_panel: PanelContainer
 var talk_log: RichTextLabel
 var talk_title: Label
+var talk_face: TextureRect
 var talk_input: LineEdit
 var raise_row: HBoxContainer
 var modal_panel: PanelContainer
@@ -114,6 +120,7 @@ var tag_canvas := Control.new()  # building tags are painted here, under the pan
 var tags_seen := []
 var saved_at := 0  # sim.ticks at the last save
 var tut_text: RichTextLabel
+var tut_marker := MeshInstance3D.new()  # the glowing tile the tutorial wants built on
 var build_buttons := {}  # kind -> its button in the build bar
 var sounds := {}  # sound name -> its AudioStreamPlayer
 var music := AudioStreamPlayer.new()
@@ -145,12 +152,9 @@ func _ready() -> void:
 		_time_remark()
 	if stress:
 		_stress()
-	else:
-		_ask("[font_size=30][b]Hoppertunity[/b][/font_size]\n\nThe Hopper Works makes gadgets, when it makes anything at all. "
-				+ "The order book is thin, the crew is tired, and the bank has stopped being polite.\n\n"
-				+ "You are Pip Hopper, the new floor manager. Ship five contracts and the plant is saved. "
-				+ "Look after the four people who run it, or it will not be.",
-				[["Open the gates", Callable()]] if saved.is_empty() else [["Back to work (day %d)" % sim.day, Callable()], ["New game", _new_game]])
+	elif not saved.is_empty():  # a new game needs no title card: its tutorial's first step is the introduction
+		_ask("[font_size=30][b]Hoppertunity[/b][/font_size]\n\nThe Hopper Works is as you left it, on day %d with %d coins." % [sim.day, sim.money],
+				[["Back to work", Callable()], ["New game", _new_game]])
 
 
 ## Developer aid (`?remark` in the browser): ask the gateway for a streamed day-end remark straight away and print to
@@ -203,6 +207,7 @@ func _start(saved: Dictionary) -> void:
 	if saved.is_empty():
 		player_id = "pip-%08x" % (randi() & 0x7fffffff)
 		tutorial = 0
+		sim.starter()
 	else:
 		tutorial = int(saved.get("tutorial", TUTORIAL.size()))
 		sim.restore(saved.sim)
@@ -357,17 +362,32 @@ func _save() -> void:
 func _world() -> void:
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color("3b3a4a")
+	env.background_color = Color("23222d")
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color("c9c6e8")
-	env.ambient_light_energy = 0.7
+	env.ambient_light_color = Color("b9b6e0")
+	env.ambient_light_energy = 0.6
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
 	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-55, 35, 0)
+	sun.rotation_degrees = Vector3(-50, 30, 0)
+	sun.light_color = Color("fff1dc")  # late-afternoon light through the factory's open sides
+	sun.light_energy = 1.05
 	sun.shadow_enabled = true
+	# one shadow map, not the default four: the camera is orthographic and sees one patch of floor, and four passes
+	# cost a third of the frame rate on integrated graphics
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+	sun.directional_shadow_max_distance = 120.0
 	add_child(sun)
+	add_child(scenery)
+	tut_marker.mesh = PlaneMesh.new()
+	tut_marker.mesh.size = Vector2(1, 1)
+	var glow_mat := StandardMaterial3D.new()
+	glow_mat.albedo_color = Color(ORANGE, 0.7)
+	glow_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	glow_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	tut_marker.mesh.material = glow_mat
+	add_child(tut_marker)
 	cam.projection = Camera3D.PROJECTION_ORTHOGONAL
 	cam.far = 200.0
 	add_child(cam)
@@ -543,6 +563,74 @@ func _refresh(pos: Vector2i) -> void:
 		trucks[pos] = {"node": van, "home": van.position, "front": front, "count": 0, "last_t": 0.0, "away": false}
 
 
+## The factory building, for show: a walkway apron with hazard stripes round the build floor, the yard outside, walls
+## with windows on the two sides away from the camera (so they never hide the floor), and a few props. Rebuilt when the
+## floor grows or the view turns.
+func _scenery() -> void:
+	if scenery_for == [sim.floor_size, yaw]:
+		return
+	scenery_for = [sim.floor_size, yaw]
+	for ch in scenery.get_children():
+		ch.queue_free()
+	var size := Vector2(sim.floor_size)
+	var yard := MeshInstance3D.new()
+	yard.mesh = PlaneMesh.new()
+	yard.mesh.size = Vector2(160, 160)
+	var asphalt := StandardMaterial3D.new()
+	asphalt.albedo_color = Color("2a2933")
+	yard.mesh.material = asphalt
+	yard.position = Vector3(size.x / 2, -0.03, size.y / 2)
+	scenery.add_child(yard)
+	var apron := MultiMesh.new()
+	var stripes := MultiMesh.new()
+	var apron_at := []
+	var stripes_at := []
+	for x in range(-APRON, sim.floor_size.x + APRON):
+		for y in range(-APRON, sim.floor_size.y + APRON):
+			if x < 0 or y < 0 or x >= sim.floor_size.x or y >= sim.floor_size.y:
+				apron_at.append(Transform3D(Basis(), _center(Vector2i(x, y)) + Vector3(0, -0.01, 0)))
+				if x == -1 or y == -1 or x == sim.floor_size.x or y == sim.floor_size.y:  # the ring that touches the floor
+					stripes_at.append(Transform3D(Basis(Vector3.UP, PI / 2 if (x == -1 or x == sim.floor_size.x) else 0.0), _center(Vector2i(x, y))))
+	for pair in [[apron, apron_at, "floor", Color(0.3, 0.3, 0.4)], [stripes, stripes_at, "indicator-special-lines", Color(0.62, 0.5, 0.3)]]:
+		pair[0].transform_format = MultiMesh.TRANSFORM_3D
+		pair[0].mesh = _mesh(MODELS + pair[2] + ".glb")
+		pair[0].instance_count = pair[1].size()
+		for i in pair[1].size():
+			pair[0].set_instance_transform(i, pair[1][i])
+		var mi := MultiMeshInstance3D.new()
+		mi.multimesh = pair[0]
+		var mat: BaseMaterial3D = pair[0].mesh.surface_get_material(0).duplicate()
+		mat.albedo_color = pair[3]
+		mi.material_override = mat
+		scenery.add_child(mi)
+	# walls stand on the sides away from the camera
+	var toward := Basis(Vector3.UP, yaw * PI / 2 + PI / 4).z  # from the floor toward the camera
+	var wall_z := -APRON - 1.5 if toward.z > 0 else size.y + APRON + 1.5
+	var wall_x := -APRON - 1.5 if toward.x > 0 else size.x + APRON + 1.5
+	var x := -APRON - 1
+	while x < sim.floor_size.x + APRON + 1:  # the wall that runs along X: pillars, with a wide window every few
+		var wide := (x + APRON) % 5 == 2
+		_prop("structure-window-wide" if wide else "structure-wall", Vector3(x + (1.0 if wide else 0.5), 0, wall_z), 0.0 if toward.z > 0 else PI)
+		x += 2 if wide else 1
+	var z := -APRON - 1
+	while z < sim.floor_size.y + APRON + 1:  # and the one along Z
+		var wide := (z + APRON) % 5 == 2
+		_prop("structure-window-wide" if wide else "structure-wall", Vector3(wall_x, 0, z + (1.0 if wide else 0.5)), PI / 2 if toward.x > 0 else -PI / 2)
+		z += 2 if wide else 1
+	for corner in [Vector2(-1.5, -1.5), Vector2(size.x + 0.5, -1.5), Vector2(-1.5, size.y + 0.5), Vector2(size.x + 0.5, size.y + 0.5)]:
+		_prop("cone", Vector3(corner.x + 0.5, 0, corner.y + 0.5), 0.0, 0.8)
+	var far := Vector3(-1.4 if toward.x > 0 else size.x + 1.4, 0, -1.4 if toward.z > 0 else size.y + 1.4)
+	_prop("crane", far, atan2(toward.x, toward.z) + PI, 0.6)
+
+
+func _prop(model: String, at: Vector3, turn: float, scale := 1.0) -> void:
+	var n: Node3D = load(MODELS + model + ".glb").instantiate()
+	n.position = at
+	n.rotation.y = turn
+	n.scale = Vector3.ONE * scale
+	scenery.add_child(n)
+
+
 func _floor() -> void:
 	floor_mm.instance_count = sim.floor_size.x * sim.floor_size.y
 	for x in sim.floor_size.x:
@@ -586,6 +674,7 @@ func _process(delta: float) -> void:
 				break
 	_walk_crew(delta)
 	_camera(delta)
+	_scenery()
 	if belts_dirty:
 		_draw_belts()
 	for pos in trucks:  # an inbound dock's counter drops back to zero each time it unloads a crate
@@ -1039,9 +1128,16 @@ func _ui() -> void:
 	talk_panel = _panel(Control.PRESET_CENTER_RIGHT, root, Vector2(380, 420))
 	var tv := VBoxContainer.new()
 	talk_panel.add_child(tv)
+	var head := HBoxContainer.new()
+	tv.add_child(head)
+	talk_face = TextureRect.new()
+	talk_face.custom_minimum_size = Vector2(56, 56)
+	talk_face.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	talk_face.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	head.add_child(talk_face)
 	talk_title = Label.new()
 	talk_title.add_theme_color_override("font_color", ORANGE)
-	tv.add_child(talk_title)
+	head.add_child(talk_title)
 	talk_log = RichTextLabel.new()
 	talk_log.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	talk_log.scroll_following = true
@@ -1061,13 +1157,15 @@ func _ui() -> void:
 	talk_input.text_submitted.connect(_say)
 	tv.add_child(talk_input)
 
-	tut_panel = _panel(Control.PRESET_TOP_LEFT, root, Vector2(380, 0))
+	tut_panel = _panel(Control.PRESET_TOP_LEFT, root, Vector2(430, 0))
 	tut_panel.offset_top = 120
 	var uv := VBoxContainer.new()
 	tut_panel.add_child(uv)
 	tut_text = RichTextLabel.new()
 	tut_text.bbcode_enabled = true
 	tut_text.fit_content = true
+	tut_text.add_theme_font_size_override("normal_font_size", 18)
+	tut_text.add_theme_font_size_override("bold_font_size", 18)
 	uv.add_child(tut_text)
 	_button("Skip the tutorial", uv, func(): tutorial = TUTORIAL.size())
 
@@ -1118,11 +1216,21 @@ func _build_buttons() -> void:
 	build_buttons = {}
 	for kind in Data.BUILD:
 		if kind in sim.unlocked:
-			var key := "%d  " % (build_buttons.size() + 1) if build_buttons.size() < 9 else ""  # number keys 1 to 9
-			var b := _button("%s%s %d" % [key, Data.BUILD[kind].name, Data.BUILD[kind].cost], build_bar, func(): tool = "" if tool == kind else kind)
+			# a card: the kit's own picture of the piece, its name, its price, and its number key (1 to 9)
+			var key := "%d " % (build_buttons.size() + 1) if build_buttons.size() < 9 else ""
+			var b := _button("%s%s\n%d coins" % [key, Data.BUILD[kind].name, Data.BUILD[kind].cost], build_bar, func(): tool = "" if tool == kind else kind)
+			b.icon = load("res://assets/icons/%s.png" % kind)
+			b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			b.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
+			b.expand_icon = true
+			b.custom_minimum_size = Vector2(104, 96)
+			b.add_theme_font_size_override("font_size", 13)
+			b.add_theme_color_override("icon_normal_color", LOOK[kind][2])
+			b.add_theme_color_override("icon_hover_color", LOOK[kind][2])
+			b.add_theme_color_override("icon_pressed_color", LOOK[kind][2])
 			b.tooltip_text = _does(kind)
 			build_buttons[kind] = b
-	_button("Bigger floor %d" % sim.expand_cost(), build_bar, _expand).tooltip_text = "Two more rows and columns of floor."
+	_button("Expand %d" % sim.expand_cost(), build_bar, _expand).tooltip_text = "Two more rows and columns of floor."
 	_button("Upgrades", build_bar, _upgrades).tooltip_text = "One-off improvements to the whole plant."
 	_button("Crew", build_bar, _crew_sheet).tooltip_text = "Everyone's morale, pay, errands and story at a glance."
 	# everything the keyboard, wheel and right button do, for a touch screen or a one-button mouse
@@ -1242,36 +1350,43 @@ func _hud() -> void:
 	_tutorial()
 
 
-func _has(kind: String) -> bool:
-	return sim.cells.values().any(func(c): return c.kind == kind)
+func _count(kind: String) -> int:
+	return sim.cells.values().filter(func(c): return c.kind == kind).size()
 
 
 func _tutorial_done(step: int) -> bool:
 	match step:
-		0: return _has("inbound")
-		1: return _has("press")
-		2: return _has("outbound")
-		3: return sim.today.shipped > 0 or sim.contract.done > 0 or sim.contracts_done > 0
-		4: return sim.contract.done >= 5 or sim.contracts_done > 0 or speed != 1.0
-		5: return talking != ""
-		6: return not sim.quest.is_empty() or sim.quests_done.values().max() > 0
+		0: return sim.today.shipped >= 2 or sim.day > 1
+		1: return _count("inbound") >= 2
+		2: return _count("press") >= 2
+		3: return _count("belt") >= 4
+		4: return _count("outbound") >= 2
+		5: return speed != 1.0
+		6: return talking != ""
+		7: return not sim.quest.is_empty() or sim.quests_done.values().max() > 0
 	return sim.quests_done.values().max() > 0
 
 
-## Show the current tutorial step, move on when it is done, and pulse the build button it talks about.
+## Show the current tutorial step, move on when it is done, pulse the build button it talks about and light up the
+## floor tile it wants. Nothing shows while a question or report is up, so the two never compete.
 func _tutorial() -> void:
 	if tutorial < TUTORIAL.size() and _tutorial_done(tutorial):
 		tutorial += 1
 		_sfx("step")
-	tut_panel.visible = tutorial < TUTORIAL.size()
-	var want: String = TUTORIAL[tutorial][1] if tut_panel.visible else ""
-	if tut_panel.visible:
-		tut_text.text = "[color=#f2a13c]Step %d of %d[/color]
-%s" % [tutorial + 1, TUTORIAL.size(), TUTORIAL[tutorial][0]]
+	var on := tutorial < TUTORIAL.size()
+	tut_panel.visible = on and not modal
+	var want: String = TUTORIAL[tutorial][1] if on else ""
+	if on:
+		tut_text.text = "[color=#f2a13c]Getting started: %d of %d[/color]\n%s" % [tutorial + 1, TUTORIAL.size(), TUTORIAL[tutorial][0]]
 	var glow := 0.75 + 0.5 * absf(sin(Time.get_ticks_msec() / 300.0))
 	for kind in build_buttons:
 		build_buttons[kind].modulate = Color(glow, glow, glow * 0.6) if kind == want else (Color(1.6, 1.3, 0.8) if kind == tool else Color.WHITE)
 	remove_button.modulate = Color(1.7, 0.9, 0.8) if tool == "remove" else Color.WHITE
+	var tile = TUTORIAL[tutorial][2] if on else null
+	tut_marker.visible = tile != null and not sim.cells.has(tile)  # built somewhere else instead: the step still counts
+	if tile != null:
+		tut_marker.position = _center(tile) + Vector3(0, 0.04, 0)
+		tut_marker.scale = Vector3.ONE * (0.85 + 0.1 * glow)
 
 
 func _toast(text: String) -> void:
@@ -1368,6 +1483,7 @@ func _open_talk(id: String) -> void:
 	tool = ""
 	_send("pip", crew_nodes[id].position + Vector3(0.3, 0, 1.2))
 	talk_title.text = "%s, %s" % [Data.CREW[id].name, Data.CREW[id].role]
+	talk_face.texture = load("res://assets/icons/crew-%s.png" % id)
 	talk_log.clear()
 	raise_row.hide()
 	talk_panel.show()

@@ -76,6 +76,15 @@ func build(kind: String, pos: Vector2i, dir := 0) -> bool:
 	return true
 
 
+## The line a new game opens on, free of charge: steel in, one press, panels out. The tutorial builds on it.
+func starter() -> void:
+	var line := ["inbound", "belt", "press", "belt", "belt", "outbound"]
+	for i in line.size():
+		money += Data.BUILD[line[i]].cost
+		build(line[i], Vector2i(4 + i, 4), 0)
+	today.built = 0
+
+
 ## Remove a building for half its cost back. Whatever it held is lost.
 func demolish(pos: Vector2i) -> void:
 	if cells.has(pos):

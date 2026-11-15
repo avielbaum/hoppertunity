@@ -12,3 +12,4 @@ free to use, change and share, also commercially, with no credit required.
 | `audio/music.mp3` | CC0 | "Bossa Nova" (file "8bit Bossa") by Joth, unchanged. Downloaded from https://opengameart.org/content/bossa-nova |
 | `audio/*.ogg` | CC0 | "Interface Sounds" 1.0 by Kenney, eleven of the sounds, renamed for what they are used for. Downloaded from https://opengameart.org/content/interface-sounds |
 | `vehicles/*` | CC0 | "Car Kit" 3.1 by Kenney, the delivery van, unchanged. Downloaded from https://opengameart.org/content/car-kit |
+| `icons/*` | CC0 | The preview pictures that come with Kenney's Factory Kit and Mini Characters, converted to RGBA, for the build buttons and the talk panel |

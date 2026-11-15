@@ -338,7 +338,8 @@ func run() -> int:
 	var g: Node = load("res://main.tscn").instantiate()
 	g.save_path = "user://hoppertunity_check.json"  # never the player's own save
 	add_child(g)
-	ok(g.modal and g.sim.day == 1, "the game opens on its title screen")
+	ok(not g.modal and g.sim.day == 1 and g.sim.cells.size() == 6 and g.sim.money == Data.START_MONEY and g.tutorial == 0,
+			"a new game opens straight onto the starter line, standing and paid for, with the tutorial's introduction")
 	g._next_modal()
 	var col := 2
 	for piece in ["inbound", "press", "belt", "outbound"]:
@@ -349,8 +350,8 @@ func run() -> int:
 	g.sim.morale.qa = 100.0
 	for i in 5:
 		await get_tree().process_frame
-	ok(g.sim.cells.size() == 4 and g.views.size() == 3 and g.belt_mm.belt.instance_count == 1 and g.tutorial >= 3,
-			"clicking builds a line: three building nodes, one batched conveyor, and the tutorial follows along")
+	ok(g.sim.cells.size() == 10 and g.views.size() == 6 and g.belt_mm.belt.instance_count == 4,
+			"clicking builds a second line: three more building nodes and one more batched conveyor")
 	run_ticks(g.sim, Data.TICKS_PER_DAY * 2)
 	for i in 3:
 		await get_tree().process_frame
@@ -364,6 +365,10 @@ func run() -> int:
 			"two days pass: day-end reports queue up, the first contract ships, the game is saved")
 	while g.modal:
 		g._next_modal()
+	for i in 8:
+		await get_tree().process_frame
+	ok(g.tutorial == 5 and g.tut_panel.visible and not g.tut_marker.visible,
+			"the tutorial has followed along: crates shipped, a second line built, and now it asks about the speed buttons")
 	g.speed = 0.0  # paused: a real gateway takes half a minute to answer, and no day may end under the checks below
 	g._click(Vector2i(3, 3))
 	g._open_talk("tech")
@@ -391,7 +396,7 @@ func run() -> int:
 	g._refresh(Vector2i(4, 3))
 	for i in 3:
 		await get_tree().process_frame
-	ok("breakroom" in g.sim.upgrades and g.sim.floor_size == Vector2i(18, 14) and g.belt_mm.belt.instance_count == 0 and not g.modal,
+	ok("breakroom" in g.sim.upgrades and g.sim.floor_size == Vector2i(18, 14) and g.belt_mm.belt.instance_count == 3 and not g.modal,
 			"upgrades, the crew sheet, a bigger floor and removing a conveyor all go through")
 	var s2 := Sim.new()
 	var old: Dictionary = g.sim.save()
@@ -421,8 +426,8 @@ func run() -> int:
 	g._answer(g._new_game)
 	for i in 3:
 		await get_tree().process_frame
-	ok(g.sim.cells.is_empty() and g.sim.day == 1 and g.views.is_empty() and g.belt_mm.belt.instance_count == 0 and g.belt_mm.arrow.instance_count == 0
-			and not FileAccess.file_exists("user://hoppertunity_check.json"), "a new game clears the floor, the screen and the save")
+	ok(g.sim.cells.size() == 6 and g.sim.day == 1 and g.views.size() == 3 and g.belt_mm.belt.instance_count == 3 and g.belt_mm.arrow.instance_count == 6
+			and not FileAccess.file_exists("user://hoppertunity_check.json"), "a new game is back to the starter line, on the floor and on screen, with no save")
 	g.queue_free()
 	DirAccess.remove_absolute("user://hoppertunity_check.json")
 
