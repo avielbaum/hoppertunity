@@ -72,7 +72,7 @@ var tutorial := 0  # the step Pip is on; past the end means finished or skipped
 var cam := Camera3D.new()
 var pivot := Vector3(6, 0, 4)
 var yaw := 0
-var zoom := 16.0
+var zoom := 22.0
 var views := {}  # Vector2i -> the building's Node3D (conveyors have none: they are drawn in batches, see _draw_belts)
 var belt_mm := {}  # "belt", "corner", "splitter", "arrow" -> MultiMesh
 var belts_dirty := true
@@ -82,6 +82,8 @@ var floor_mm := MultiMesh.new()
 var scenery := Node3D.new()  # the building around the floor: apron, walls on the far sides, props (see _scenery)
 var scenery_for := []  # the floor size and view it was built for
 const APRON := 2  # tiles of walkway between the build floor and the walls
+const TOWN := ["commercial/building-a.glb", "commercial/building-c.glb", "commercial/building-e.glb", "commercial/building-g.glb",
+		"commercial/building-j.glb", "commercial/building-k.glb", "industrial/building-e.glb", "industrial/building-j.glb"]
 var ghost := Node3D.new()
 var ghost_key := ""
 var crew_nodes := {}  # crew id (and "pip") -> Node3D
@@ -621,6 +623,50 @@ func _scenery() -> void:
 		_prop("cone", Vector3(corner.x + 0.5, 0, corner.y + 0.5), 0.0, 0.8)
 	var far := Vector3(-1.4 if toward.x > 0 else size.x + 1.4, 0, -1.4 if toward.z > 0 else size.y + 1.4)
 	_prop("crane", far, atan2(toward.x, toward.z) + PI, 0.6)
+	# the town the Works stands in, behind those two walls: a road, then two rows of buildings on grass. It is on the
+	# far sides only, like the walls, so nothing ever stands between the camera and the floor.
+	var out_z := -1.0 if toward.z > 0 else 1.0  # which way "behind the wall" is, along each axis
+	var out_x := -1.0 if toward.x > 0 else 1.0
+	var mid := Vector3(size.x / 2, 0, size.y / 2)
+	for side in 2:  # 0: the wall that runs along X; 1: the one along Z
+		var along := Vector3.RIGHT if side == 0 else Vector3.BACK
+		var out := Vector3(0, 0, out_z) if side == 0 else Vector3(out_x, 0, 0)
+		var wall: Vector3 = mid + out * ((size.y if side == 0 else size.x) / 2 + APRON + 1.5)
+		var length := 140.0
+		for way in [1.0, -1.0]:  # the road and the grass run round all four sides; only the far two get buildings
+			var edge: Vector3 = mid + out * way * ((size.y if side == 0 else size.x) / 2 + APRON + 1.5)
+			_slab(edge + out * way * 4.5, along, length, 4.0, Color("1c1b22"), -0.02)   # the road
+			_slab(edge + out * way * 4.5, along, length, 0.15, Color("8a8794"), -0.015)  # its centre line
+			_slab(edge + out * way * 36.5, along, length, 60.0, Color("3d5244"), -0.025)  # grass
+		for i in range(-8, 9):
+			for row in 2:
+				var pick: int = absi(i * 7 + row * 3 + side * 5) % TOWN.size()
+				var at: Vector3 = wall + out * (9.5 + row * 5.5) + along * (i * 5.0 + row * 2.5)
+				_prop_at("res://assets/town/" + TOWN[pick], at, (absi(i + row) % 4) * PI / 2, 3.4 + 0.5 * (absi(i * 3 + row) % 3))
+	var corner := mid + Vector3(out_x * (size.x / 2 + APRON + 1.5), 0, out_z * (size.y / 2 + APRON + 1.5))  # where the two walls meet
+	_prop_at("res://assets/town/industrial/water-tower.glb", corner + Vector3(out_x, 0, out_z) * 1.3, 0.0, 2.4)
+	for k in 3:  # shipping containers in the yard outside the wall
+		_prop_at("res://assets/town/industrial/shipping-container-a.glb", corner + Vector3(-out_x * (6.0 + k * 1.2), 0, out_z * 1.6), 0.0, 0.6)
+
+
+## A flat strip of one colour on the ground, `length` long in the direction `along` and `width` wide, centred on `at`.
+func _slab(at: Vector3, along: Vector3, length: float, width: float, colour: Color, height: float) -> void:
+	var m := MeshInstance3D.new()
+	m.mesh = PlaneMesh.new()
+	m.mesh.size = Vector2(length, width) if along.x != 0 else Vector2(width, length)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = colour
+	m.mesh.material = mat
+	m.position = at + Vector3(0, height, 0)
+	scenery.add_child(m)
+
+
+func _prop_at(path: String, at: Vector3, turn: float, scale := 1.0) -> void:
+	var n: Node3D = load(path).instantiate()
+	n.position = at
+	n.rotation.y = turn
+	n.scale = Vector3.ONE * scale
+	scenery.add_child(n)
 
 
 func _prop(model: String, at: Vector3, turn: float, scale := 1.0) -> void:
