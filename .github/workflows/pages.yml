@@ -1,0 +1,70 @@
+name: test, build and publish
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      GODOT: 4.3-stable
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Godot (checksum from the release page)
+        run: |
+          base=https://github.com/godotengine/godot/releases/download/$GODOT
+          f=Godot_v${GODOT}_linux.x86_64.zip
+          curl -fsSL -O $base/$f -O $base/SHA512-SUMS.txt
+          grep " $f\$" SHA512-SUMS.txt | sha512sum -c -
+          unzip -q $f
+          sudo mv Godot_v${GODOT}_linux.x86_64 /usr/local/bin/godot
+          rm $f
+      - name: Self-checks (no gateway here, so the coworkers' written lines are what is tested)
+        run: |
+          godot --headless --path . --import || true
+          godot --headless --path . --script res://test/run.gd > checks.log 2>&1 || true
+          cat checks.log
+          grep -q "^0 failed" checks.log && ! grep -q "SCRIPT ERROR\|Parse Error" checks.log
+      - name: Cache the web export template
+        uses: actions/cache@v4
+        with: {path: ~/.local/share/godot/export_templates, key: "godot-web-template-${{ env.GODOT }}"}
+      - name: Install the web export template (checksum from the release page)
+        run: |
+          d=~/.local/share/godot/export_templates/${GODOT/-/.}   # 4.3-stable -> 4.3.stable
+          if [ ! -f $d/web_nothreads_release.zip ]; then
+            f=Godot_v${GODOT}_export_templates.tpz
+            curl -fsSL -O https://github.com/godotengine/godot/releases/download/$GODOT/$f
+            grep " $f\$" SHA512-SUMS.txt | sha512sum -c -
+            mkdir -p $d && unzip -q -j $f templates/web_nothreads_release.zip templates/version.txt -d $d
+            rm $f
+          fi
+      - name: Export for the browser (WebGL 2, no threads)
+        run: |
+          mkdir -p build/web
+          godot --headless --path . --export-release "Web" build/web/index.html > export.log 2>&1 || true
+          tail -5 export.log
+          test -s build/web/index.wasm && test -s build/web/index.pck
+      - uses: actions/setup-node@v4
+        with: {node-version: "22"}   # the browser check talks to Chrome with Node's built-in WebSocket
+      - name: Does the web build run and draw? (headless Chrome, software WebGL)
+        run: node test/web.mjs
+      - uses: actions/upload-pages-artifact@v3
+        with: {path: build/web}
+  publish:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
