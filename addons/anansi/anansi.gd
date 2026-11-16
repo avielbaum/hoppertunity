@@ -25,9 +25,18 @@ var stream_timeout_s := 30.0
 ## Quest and storyline generation is slow (tens of seconds on a small GPU): use it on loading screens.
 var generation_timeout_s := 60.0
 
+## Direct fallback, off unless set: {"system": the NPC's prompt, "actions": [...], "url", "model", "min_interval_s",
+## "timeout_s", "max_tokens"}. When the gateway cannot be reached, chat() asks that public LLM (default Pollinations, keyless,
+## one reply per player IP every 45 s as of 2026-11; calls are spaced 60 s apart by default and its Retry-After is honoured)
+## before the local fallback. The prompt ships in your game and the player's text goes to that service; none of the gateway's
+## checks run there, only check_direct(). Read docs/sdk.md before turning it on.
+var direct := {}
+const DIRECT_URL := "https://text.pollinations.ai/openai"
+
 var _base := ""
 var _title := ""
 var _key := ""
+var _next_direct := 0
 
 
 func setup(base_url: String, title_id: String, title_key: String, token := "") -> void:
@@ -43,11 +52,106 @@ func chat(messages: Array, npc_id := "", structured := false) -> Dictionary:
 	var body := {"messages": messages, "structured": structured}
 	if npc_id != "":
 		body["npc_id"] = npc_id
-	var r = await _post("/v1/npc", body, timeout_s)
-	if r != null and str(r.get("say", "")) != "":  # an empty reply is as good as none
+	var res: Array = await _request(HTTPClient.METHOD_POST, "/v1/npc", body, timeout_s)
+	var r: Dictionary = res[1]
+	if res[0] == 200 and str(r.get("say", "")) != "":  # an empty reply is as good as none
 		return {"source": "gateway", "say": str(r["say"]), "action": str(r.get("action", "none")),
 				"filtered": bool(r.get("filtered", false))}
+	# only an absent gateway goes direct (no answer, or 502-504 from a proxy); 401, 403 and 429 are answers.
+	# shortcut: _request also gives 0 for a 200 whose body is not JSON, which then counts as absent too
+	if res[0] in [0, 502, 503, 504] and not direct.is_empty():
+		var d = await _direct(messages, structured)
+		if d != null:
+			return {"source": "direct", "say": d[0], "action": d[1], "filtered": false}
 	return await _fallback_reply(messages)
+
+
+## [say, action] from the direct LLM, or null (off, too soon after the last call, no answer, or failed the checks).
+func _direct(messages: Array, structured: bool) -> Variant:
+	if not direct.has("system") or Time.get_ticks_msec() < _next_direct:
+		return null
+	_next_direct = Time.get_ticks_msec() + int(float(direct.get("min_interval_s", 60)) * 1000.0)
+	var actions: Array = direct.get("actions", [])
+	var system: String = direct["system"]
+	if structured:
+		var opts := []
+		for a in actions + ["none"]:
+			opts.append(JSON.stringify(a))
+		system += " Reply with only a JSON object, no other text, shaped like this: {\"say\": \"<what you say>\", \"action\": " + " | ".join(opts) + "}"
+	var kept := messages.filter(func(m): return m is Dictionary and m.get("role") in ["user", "assistant"])
+	var msgs := [{"role": "system", "content": system}]
+	msgs.append_array(kept.slice(maxi(0, kept.size() - 8)))
+	var req := HTTPRequest.new()
+	req.timeout = float(direct.get("timeout_s", 20))
+	add_child(req)
+	var body := {"model": direct.get("model", "openai"), "max_tokens": int(direct.get("max_tokens", 400)), "messages": msgs}
+	if req.request(str(direct.get("url", DIRECT_URL)), PackedStringArray(["Content-Type: application/json"]),
+			HTTPClient.METHOD_POST, JSON.stringify(body)) != OK:
+		req.queue_free()
+		return null
+	var r: Array = await req.request_completed  # [result, response code, headers, body]
+	req.queue_free()
+	if r[0] != HTTPRequest.RESULT_SUCCESS:
+		return null
+	if r[1] == 402:  # over the free limit: wait as long as the service says
+		var wait := 60.0
+		for h in r[2]:
+			if h.to_lower().begins_with("retry-after:"):
+				wait = h.split(":", true, 1)[1].strip_edges().to_float()
+		_next_direct = Time.get_ticks_msec() + int(wait * 1000.0)
+	if r[1] != 200:
+		return null
+	var j = JSON.parse_string((r[3] as PackedByteArray).get_string_from_utf8())
+	if not j is Dictionary or not j.get("choices") is Array or j["choices"].is_empty() or not j["choices"][0] is Dictionary:
+		return null
+	var message = j["choices"][0].get("message", {})
+	if not message is Dictionary:
+		return null
+	return check_direct(str(message.get("content", "")), direct["system"], actions, structured)
+
+
+## [say, action] if a direct reply may reach the player, else null: no usable text, an AI or language-model statement,
+## or five words in a row copied from the NPC's prompt. An action not in `actions` becomes "none".
+static func check_direct(text: String, system: String, actions: Array, structured: bool, max_chars := 600) -> Variant:
+	var act := "none"
+	if structured:
+		var a := text.find("{")
+		var b := text.rfind("}")
+		if a < 0 or b <= a:
+			return null
+		var d = JSON.parse_string(text.substr(a, b - a + 1))
+		if not d is Dictionary:
+			return null
+		text = str(d.get("say", ""))
+		act = str(d.get("action", "none"))
+		if not (act in actions):
+			act = "none"
+	var label := RegEx.create_from_string("(?i)\\s*action\\s*[:=]\\s*\\w+\\W*$")
+	var space := RegEx.create_from_string("\\s+")
+	var say := space.sub(label.sub(text, ""), " ", true).strip_edges().substr(0, max_chars).strip_edges()
+	var ai := RegEx.create_from_string("(?i)\\b(i am|i'm|as) (just |only )?an? (ai|a\\.i\\.|llm|chatbot|language model|artificial intelligence|(computer )?program|software|bot)\\b|\\blanguage model\\b")
+	if say == "" or ai.search(say) != null or _copies(say, system):
+		return null
+	return [say, act]
+
+
+static func _copies(say: String, system: String) -> bool:
+	var grams := {}
+	var w := _words(system)
+	for i in range(w.size() - 4):
+		grams[" ".join(w.slice(i, i + 5))] = true
+	var s := _words(say)
+	for i in range(s.size() - 4):
+		if grams.has(" ".join(s.slice(i, i + 5))):
+			return true
+	return false
+
+
+static func _words(t: String) -> PackedStringArray:
+	var out := PackedStringArray()
+	for m in RegEx.create_from_string("\\w+").search_all(t.to_lower()):
+		out.append(m.get_string())
+	return out
 
 
 ## A reply one finished sentence at a time: on_sentence.call(text) runs for each sentence as it arrives.
