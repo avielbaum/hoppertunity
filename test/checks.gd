@@ -300,6 +300,18 @@ func run() -> int:
 			"a quest may only name buildings on the floor and goods the plant makes")
 	ok(crew.history.tech.size() == 6 and fake.seen[0].role == "system" and "Sprocket" in fake.seen[0].content,
 			"the coworker gets a brief of who they are, and the last three exchanges")
+	ok(crew.api.direct.get("system") == Crew.DIRECT_PROMPT and crew.api.direct.get("actions") == Data.ACTIONS,
+			"without a gateway, chat may ask the public LLM with the title's prompt and actions")
+	fake.source = "direct"
+	fake.next = "none"
+	r = await crew.talk("tech", "Nice weather.")
+	var r2: Dictionary = await crew.talk("tech", "Still nice.")
+	ok(crew.direct_used and Crew.DIRECT_NOTE in r.note and not (Crew.DIRECT_NOTE in r2.note) and not crew.online,
+			"the first reply from the public LLM says so in the talk panel, once")
+	fake.source = "gateway"
+	if FileAccess.file_exists("res://config.hoppertunity.json"):  # in the Anansi repo; the standalone copy ships without it
+		var title: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://config.hoppertunity.json")).titles.hoppertunity
+		ok(title.system_prefix == Crew.DIRECT_PROMPT and title.actions == Data.ACTIONS, "the direct prompt and actions match config.hoppertunity.json")
 
 	var heard := []
 	crew.online = false
@@ -490,10 +502,11 @@ class Scripted:
 	extends Anansi
 	var next := "none"
 	var seen := []
+	var source := "gateway"
 
 	func chat(messages: Array, _npc_id := "", _structured := false) -> Dictionary:
 		seen = messages
-		return {"source": "gateway", "say": "Right you are, boss.", "action": next, "filtered": false}
+		return {"source": source, "say": "Right you are, boss.", "action": next, "filtered": false}
 
 	func chat_stream(_messages: Array, on_sentence: Callable, _npc_id := "") -> Dictionary:
 		for part in ["Busy day. ", "Bertha held up."]:

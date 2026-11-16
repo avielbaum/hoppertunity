@@ -36,7 +36,7 @@ const DIRECT_URL := "https://text.pollinations.ai/openai"
 var _base := ""
 var _title := ""
 var _key := ""
-var _next_direct := 0
+static var _next_direct := 0  # shared by every client in the game: the free limit is per player IP, not per client
 
 
 func setup(base_url: String, title_id: String, title_key: String, token := "") -> void:
@@ -72,7 +72,12 @@ func _direct(messages: Array, structured: bool) -> Variant:
 		return null
 	_next_direct = Time.get_ticks_msec() + int(float(direct.get("min_interval_s", 60)) * 1000.0)
 	var actions: Array = direct.get("actions", [])
-	var system: String = direct["system"]
+	var own := []  # the game's NPC persona, after the base prompt
+	for m in messages:
+		if m is Dictionary and m.get("role") == "system":
+			own.append(str(m.get("content", "")))
+	var prompt: String = str(direct["system"]) + ("\n" + "\n".join(own) if not own.is_empty() else "")
+	var system := prompt
 	if structured:
 		var opts := []
 		for a in actions + ["none"]:
@@ -107,7 +112,7 @@ func _direct(messages: Array, structured: bool) -> Variant:
 	var message = j["choices"][0].get("message", {})
 	if not message is Dictionary:
 		return null
-	return check_direct(str(message.get("content", "")), direct["system"], actions, structured)
+	return check_direct(str(message.get("content", "")), prompt, actions, structured, int(direct.get("max_chars", 600)))
 
 
 ## [say, action] if a direct reply may reach the player, else null: no usable text, an AI or language-model statement,
@@ -127,8 +132,13 @@ static func check_direct(text: String, system: String, actions: Array, structure
 		if not (act in actions):
 			act = "none"
 	var label := RegEx.create_from_string("(?i)\\s*action\\s*[:=]\\s*\\w+\\W*$")
-	var space := RegEx.create_from_string("\\s+")
-	var say := space.sub(label.sub(text, ""), " ", true).strip_edges().substr(0, max_chars).strip_edges()
+	var space := RegEx.create_from_string("[ \\t\\r\\f\\v]+")
+	var lines := PackedStringArray()  # line breaks kept: some prompts ask for an answer in lines
+	for line in label.sub(text, "").split("\n"):
+		var l := space.sub(line, " ", true).strip_edges()
+		if l != "":
+			lines.append(l)
+	var say := "\n".join(lines).substr(0, max_chars).strip_edges()
 	var ai := RegEx.create_from_string("(?i)\\b(i am|i'm|as) (just |only )?an? (ai|a\\.i\\.|llm|chatbot|language model|artificial intelligence|(computer )?program|software|bot)\\b|\\blanguage model\\b")
 	if say == "" or ai.search(say) != null or _copies(say, system):
 		return null

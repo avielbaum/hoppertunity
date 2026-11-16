@@ -7,6 +7,13 @@ extends Node
 var sim: Sim
 var api := Anansi.new()
 var online := false  # did the gateway answer the last time it was asked (a chat, a remark or a quest)?
+var direct_used := false  # has a reply come from the public LLM (no gateway; the GitHub Pages build)?
+
+## Without a gateway, chat asks Pollinations' keyless public LLM directly: one reply per player per minute, checked by the
+## SDK only, then the written lines. These are the gateway title's prompt and actions (the Anansi repository's tests keep them
+## equal to its gateway config). Quests, stories and end-of-day remarks stay on the written ones.
+const DIRECT_PROMPT := "You are a worker at the Hopper Works, a small, friendly gadget factory. The next system message tells you who you are and how the plant is doing. Stay in character, never mention being an AI, and reply in one to three short sentences. Choose exactly one action per reply: morale_up if the manager is kind, fair, encouraging or helps you; morale_down if the manager is rude, dismissive or unfair; offer_quest if the manager asks for work, a task or how to help; share_tip only if the manager asks about upcoming orders or customers; ask_raise only if the manager brings up pay or wages; otherwise none."
+const DIRECT_NOTE := "(Reply by Pollinations AI: with no Anansi server, what you type is sent to pollinations.ai.)"
 var history := {}  # crew id -> the last few messages, so a coworker remembers the conversation
 var queued := {}  # crew id -> a quest generated ahead of time
 var stories := {}  # crew id -> four beats (generated at the start of a game, else Data.STORIES)
@@ -29,6 +36,7 @@ func setup(s: Sim, url: String, title: String, key: String, player_id: String) -
 	# A small local model on CPU answers one request at a time: 30 s for a first reply was measured, and a reply can
 	# also have to wait for a quest that is being generated (20 to 40 s). The SDK's default of 3 s suits a GPU.
 	api.timeout_s = 75.0
+	api.direct = {"system": DIRECT_PROMPT, "actions": Data.ACTIONS}
 	for id in Data.CREW:
 		history[id] = []
 		if not stories.has(id):
@@ -54,6 +62,9 @@ func talk(id: String, text: String) -> Dictionary:
 		out.raise = true
 	else:
 		out.note = sim.apply_action(id, action)
+	if r.source == "direct" and not direct_used:  # the first time, say where the words came from and what was sent
+		direct_used = true
+		out.note = (out.note + " " if out.note != "" else "") + DIRECT_NOTE
 	return out
 
 

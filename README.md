@@ -44,8 +44,9 @@ has two volume sliders. Everything the keyboard does also has a button in the bo
 The coworkers are written for [Anansi](addons/anansi/anansi.gd), a gateway that serves small language models to game
 characters; this repository includes its Godot client (`addons/anansi`, MIT or Apache-2.0) but not the gateway. The
 hosted game looks for a gateway on your own machine at `http://127.0.0.1:8080`, title `hoppertunity`. If none answers,
-which is the normal case, the coworkers use written lines, written errands and written stories, and the game plays the
-same; the top bar says "Anansi offline". With a gateway, what you type is answered in character, and the answer can
+which is the normal case, what you type to a coworker goes to Pollinations' free public AI (pollinations.ai) instead, at
+most one reply a minute with the same five actions; the first such reply and the top bar say so. Everything else uses written
+lines, written errands and written stories, and the game plays the same. With a gateway, what you type is answered in character, and the answer can
 do exactly five things: lift or lower that coworker's morale a little, offer an errand, share a tip about the next
 contract, or ask for a raise. The game owns every number; a model only ever picks words and one of those actions.
 

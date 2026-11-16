@@ -1146,6 +1146,8 @@ func _ui() -> void:
 	quest_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	col.add_child(quest_label)
 	net_label = Label.new()
+	net_label.mouse_filter = Control.MOUSE_FILTER_PASS  # so the tooltip shows
+	net_label.tooltip_text = "Without an Anansi server, what you type to your coworkers is sent to Pollinations AI (pollinations.ai) for a reply."
 	row.add_child(net_label)
 	for s in [["||", 0.0], [">", 1.0], [">>", 2.0], [">>>", 4.0]]:
 		speed_buttons[s[1]] = _button(s[0], row, func(): speed = s[1])
@@ -1367,7 +1369,7 @@ func _hud() -> void:
 		var s: Dictionary = sim.quest.steps[sim.quest.step]
 		quest_label.text = "Quest for %s: %s%s" % [Data.CREW[sim.quest.giver].name, s.get("description", ""),
 				" (%d/%d)" % [sim.quest.have, sim.quest.need] if sim.quest.need > 1 else ""]
-	net_label.text = "Anansi live" if crew.online else "Anansi offline"
+	net_label.text = "Anansi live" if crew.online else ("Replies: Pollinations AI" if crew.direct_used else "Anansi offline")
 	# The interface is laid out for 1280x720 and shrinks with the window. On a phone that leaves the text too small to
 	# read or tap, so below about 85% size everything is scaled back up (and the bars wrap onto more rows).
 	var window := Vector2(DisplayServer.window_get_size())
