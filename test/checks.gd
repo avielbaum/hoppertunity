@@ -330,6 +330,7 @@ func run() -> int:
 	var live := OS.get_environment("HOP_REQUIRE_LIVE") == "1"
 	crew.setup(s, url, "hoppertunity", "change-me", "ci")
 	crew.api.timeout_s = 5.0
+	crew.api.direct = {}  # tests never call the public LLM: without a gateway this checks the written lines
 	r = await crew.talk("tech", 'echo: {"say": "Bertha is purring, boss.", "action": "morale_up"}')
 	print("     chat source: ", r.source)
 	ok(r.say != "" and (r.source == "gateway" or not live), "a coworker always answers (%s)" % r.say)

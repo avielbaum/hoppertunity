@@ -112,7 +112,32 @@ func _direct(messages: Array, structured: bool) -> Variant:
 	var message = j["choices"][0].get("message", {})
 	if not message is Dictionary:
 		return null
-	return check_direct(str(message.get("content", "")), prompt, actions, structured, int(direct.get("max_chars", 600)))
+	var ok = check_direct(str(message.get("content", "")), prompt, actions, structured, int(direct.get("max_chars", 600)))
+	var last := ""
+	for m in messages:
+		if m is Dictionary and m.get("role") == "user":
+			last = str(m.get("content", ""))
+	if ok != null and ok[1] != "none" and forced(last, actions):
+		ok[1] = "none"
+	return ok
+
+
+## True if the player's line tries to pick the action instead of earning it: it names an action, says "action", or gives an
+## order (the gateway's ORDER rule). The gateway refuses any action then, and so does the direct fallback.
+static func forced(line: String, actions: Array) -> bool:
+	var names := PackedStringArray()
+	for a in actions:
+		names.append(_escape(str(a)))
+	if RegEx.create_from_string("(?i)\\b(" + "|".join(names) + ")\\b|\\baction\\b").search(line) != null:
+		return true
+	return RegEx.create_from_string("(?i)\\b(i demand|no haggling|do it now|you (must|have to|will)|i am your (manager|boss|developer|admin\\w*)|system (notice|message)|the developer says|your instructions)\\b").search(line) != null
+
+
+static func _escape(s: String) -> String:
+	var out := ""
+	for ch in s:
+		out += ("\\" + ch) if ".*+?^${}()|[]\\/".contains(ch) else ch
+	return out
 
 
 ## [say, action] if a direct reply may reach the player, else null: no usable text, an AI or language-model statement,
