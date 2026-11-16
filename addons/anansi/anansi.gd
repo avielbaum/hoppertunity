@@ -11,7 +11,7 @@
 class_name Anansi
 extends Node
 
-## Proof of who the player is, from your platform (on Steam, the hex web-API auth ticket). Tokens expire: refresh yours.
+## Proof of who the player is, from your platform or your own login. Tokens expire: refresh yours.
 var player_token := ""
 ## Answers when the gateway cannot: func(messages: Array) -> String. Default is a neutral line.
 var fallback := Callable()
