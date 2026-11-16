@@ -86,24 +86,20 @@ func _direct(messages: Array, structured: bool) -> Variant:
 	var kept := messages.filter(func(m): return m is Dictionary and m.get("role") in ["user", "assistant"])
 	var msgs := [{"role": "system", "content": system}]
 	msgs.append_array(kept.slice(maxi(0, kept.size() - 8)))
-	var req := HTTPRequest.new()
-	req.timeout = float(direct.get("timeout_s", 20))
-	add_child(req)
 	var body := {"model": direct.get("model", "openai"), "max_tokens": int(direct.get("max_tokens", 400)), "messages": msgs}
-	if req.request(str(direct.get("url", DIRECT_URL)), PackedStringArray(["Content-Type: application/json"]),
-			HTTPClient.METHOD_POST, JSON.stringify(body)) != OK:
-		req.queue_free()
+	var started := Time.get_ticks_msec()
+	var limit := float(direct.get("timeout_s", 20))
+	var r: Array = await _direct_send(body, limit)
+	if r.is_empty():
 		return null
-	var r: Array = await req.request_completed  # [result, response code, headers, body]
-	req.queue_free()
-	if r[0] != HTTPRequest.RESULT_SUCCESS:
-		return null
+	var wait := _retry_after(r[2]) if r[1] == 402 else 0.0
+	if wait > 0.0 and wait <= float(direct.get("retry_within_s", 15)) and (Time.get_ticks_msec() - started) / 1000.0 + wait < limit:
+		await get_tree().create_timer(wait + 0.25).timeout  # another app on this address had the slot: wait as told, once
+		r = await _direct_send(body, limit - (Time.get_ticks_msec() - started) / 1000.0)
+		if r.is_empty():
+			return null
 	if r[1] == 402:  # over the free limit: wait as long as the service says
-		var wait := 60.0
-		for h in r[2]:
-			if h.to_lower().begins_with("retry-after:"):
-				wait = h.split(":", true, 1)[1].strip_edges().to_float()
-		_next_direct = Time.get_ticks_msec() + int(wait * 1000.0)
+		_next_direct = Time.get_ticks_msec() + int(_retry_after(r[2]) * 1000.0)
 	if r[1] != 200:
 		return null
 	var j = JSON.parse_string((r[3] as PackedByteArray).get_string_from_utf8())
@@ -120,6 +116,27 @@ func _direct(messages: Array, structured: bool) -> Variant:
 	if ok != null and ok[1] != "none" and forced(last, actions):
 		ok[1] = "none"
 	return ok
+
+
+## One request to the direct LLM: [result, response code, headers, body], or [] if it could not be sent or got no answer.
+func _direct_send(body: Dictionary, timeout: float) -> Array:
+	var req := HTTPRequest.new()
+	req.timeout = maxf(1.0, timeout)
+	add_child(req)
+	if req.request(str(direct.get("url", DIRECT_URL)), PackedStringArray(["Content-Type: application/json"]),
+			HTTPClient.METHOD_POST, JSON.stringify(body)) != OK:
+		req.queue_free()
+		return []
+	var r: Array = await req.request_completed
+	req.queue_free()
+	return r if r[0] == HTTPRequest.RESULT_SUCCESS else []
+
+
+static func _retry_after(headers: PackedStringArray) -> float:
+	for h in headers:
+		if h.to_lower().begins_with("retry-after:"):
+			return h.split(":", true, 1)[1].strip_edges().to_float()
+	return 60.0
 
 
 ## True if the player's line tries to pick the action instead of earning it: it names an action, says "action", or gives an
