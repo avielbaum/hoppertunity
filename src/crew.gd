@@ -36,7 +36,7 @@ func setup(s: Sim, url: String, title: String, key: String, player_id: String) -
 	# A small local model on CPU answers one request at a time: 30 s for a first reply was measured, and a reply can
 	# also have to wait for a quest that is being generated (20 to 40 s). The SDK's default of 3 s suits a GPU.
 	api.timeout_s = 75.0
-	api.direct = {"system": DIRECT_PROMPT, "actions": Data.ACTIONS}
+	api.direct = {"system": DIRECT_PROMPT, "actions": Data.ACTIONS, "timeout_s": 30}  # the service can hold a request while the slot is busy
 	for id in Data.CREW:
 		history[id] = []
 		if not stories.has(id):
