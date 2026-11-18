@@ -59,6 +59,9 @@ func chat(messages: Array, npc_id := "", structured := false) -> Dictionary:
 				"filtered": bool(r.get("filtered", false))}
 	# only an absent gateway goes direct (no answer, or 502-504 from a proxy); 401, 403 and 429 are answers.
 	# shortcut: _request also gives 0 for a 200 whose body is not JSON, which then counts as absent too
+	# shortcut: a timeout counts as absent here, unlike the other SDKs (there a slow gateway gets the local line): Godot 4.3 on
+	# Windows reports a refused connection only as a timeout (measured: 8 s, RESULT_TIMEOUT), so it cannot tell absent from slow.
+	# Keep timeout_s above the gateway's real reply time when direct is on; revisit if a Godot release reports refusals.
 	if res[0] in [0, 502, 503, 504] and not direct.is_empty():
 		var d = await _direct(messages, structured)
 		if d != null:
