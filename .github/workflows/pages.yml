@@ -4,6 +4,8 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"   # daily: pick up what changed in examples/hoppertunity on Anansi's main
 permissions:
   contents: read
   pages: write
@@ -12,12 +14,39 @@ concurrency:
   group: pages
   cancel-in-progress: true
 jobs:
+  sync:
+    # This repository is a copy of examples/hoppertunity on avielbaum/anansi's main branch. Anansi's own script makes the copy
+    # (it leaves out the gateway config and rewords the comments that point into Anansi); a change is committed here, then built.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: main}
+      - uses: actions/checkout@v4
+        with: {repository: avielbaum/anansi, ref: main, path: _anansi, fetch-depth: 1}
+      - uses: actions/setup-node@v4
+        with: {node-version: "22"}
+      - name: Copy examples/hoppertunity from Anansi's main
+        run: |
+          node _anansi/examples/hoppertunity/tools/publish_pages.mjs .
+          sha=$(git -C _anansi rev-parse --short HEAD)
+          rm -rf _anansi
+          git add -A
+          if git diff --cached --quiet; then echo "already the same as anansi@$sha"; exit 0; fi
+          git -c user.name="github-actions[bot]" -c user.email="41898499+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "Sync from avielbaum/anansi@$sha (examples/hoppertunity)"
+          git push origin HEAD:main
   build:
+    needs: sync
+    if: ${{ !failure() && !cancelled() }}   # also when sync was skipped (a push or pull request)
     runs-on: ubuntu-latest
     env:
       GODOT: 4.3-stable
     steps:
       - uses: actions/checkout@v4
+        with: {ref: "${{ github.event_name != 'pull_request' && 'main' || '' }}"}   # main includes the sync commit
       - name: Install Godot (checksum from the release page)
         run: |
           base=https://github.com/godotengine/godot/releases/download/$GODOT
@@ -59,7 +88,7 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with: {path: build/web}
   publish:
-    if: github.event_name != 'pull_request'
+    if: ${{ github.event_name != 'pull_request' && !failure() && !cancelled() }}
     needs: build
     runs-on: ubuntu-latest
     environment:

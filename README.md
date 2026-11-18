@@ -64,6 +64,10 @@ node test/web.mjs                                                     # Node 22+
 
 `.github/workflows/pages.yml` does all of that on every push and publishes the web build to GitHub Pages.
 
+The game is developed in the [Anansi](https://github.com/avielbaum/anansi) repository, under `examples/hoppertunity` on
+`main`. This repository is a copy of that folder: once a day (or on a manual run) `pages.yml` copies it over with Anansi's
+`examples/hoppertunity/tools/publish_pages.mjs`, commits any change and publishes it. Send changes to Anansi, not here.
+
 | File | What it holds |
 |---|---|
 | `src/data.gd` | Every number and every written word: items, machines, contracts, the crew, lines, errands, stories |
