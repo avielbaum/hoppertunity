@@ -67,6 +67,8 @@ node test/web.mjs                                                     # Node 22+
 The game is developed in the [Anansi](https://github.com/avielbaum/anansi) repository, under `examples/hoppertunity` on
 `main`. This repository is a copy of that folder: once a day (or on a manual run) `pages.yml` copies it over with Anansi's
 `examples/hoppertunity/tools/publish_pages.mjs`, commits any change and publishes it. Send changes to Anansi, not here.
+GitHub switches off a public repository's daily schedule after 60 days without activity: if the site stops following
+Anansi, turn the workflow back on in the Actions tab, or run `gh workflow run pages.yml -R avielbaum/hoppertunity`.
 
 | File | What it holds |
 |---|---|
